@@ -49,7 +49,7 @@ def register_code_execution_routes(api):
             # Create a transaction for any model modifications
             t = DB.Transaction(doc, "MCP Code Execution: {}".format(description))
             t.Start()
-            suppress_warnings(t)
+            failures = suppress_warnings(t)
 
             try:
                 # Capture stdout to return any print statements
@@ -87,8 +87,26 @@ def register_code_execution_routes(api):
                 output = captured_output.getvalue()
                 captured_output.close()
 
-                # Commit the transaction
-                t.Commit()
+                # Commit the transaction. Revit can still roll it back here when a
+                # failure has error severity, so check the status instead of
+                # reporting success unconditionally.
+                status = t.Commit()
+                if status != DB.TransactionStatus.Committed:
+                    return routes.make_response(
+                        data={
+                            "status": "error",
+                            "error": "Revit rolled back the transaction ({}); no changes were saved.".format(status),
+                            "revit_errors": failures.errors[:20],
+                            "output": output,
+                            "description": description,
+                        },
+                        status=500,
+                    )
+                if failures.warnings:
+                    output = (output or "") + "\n[{} Revit warning(s) were dismissed]".format(failures.warnings)
+                if failures.deleted:
+                    output = (output or "") + "\n[{} element(s) deleted to resolve Revit errors: {}; ids {}]".format(
+                        len(failures.deleted), "; ".join(sorted(set(failures.errors))[:5]), failures.deleted[:30])
 
                 return routes.make_response(
                     data={

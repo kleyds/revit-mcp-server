@@ -12,14 +12,35 @@ class _FailureSwallower(DB.IFailuresPreprocessor):
     failure is present, the transaction is rolled back. Either way the headless
     Routes server keeps running instead of hanging on a dialog."""
 
+    def __init__(self):
+        self.errors = []    # error-severity messages that caused a rollback
+        self.warnings = 0   # count of warnings deleted
+        self.deleted = []   # ids of elements deleted to resolve errors
+
     def PreprocessFailures(self, failuresAccessor):
         try:
+            self.warnings += sum(1 for f in failuresAccessor.GetFailureMessages()
+                                 if f.GetSeverity() == DB.FailureSeverity.Warning)
             # Delete all warnings so they don't block (operation continues).
             failuresAccessor.DeleteAllWarnings()
             # If any genuine errors remain, roll back rather than go modal.
-            for f in failuresAccessor.GetFailureMessages():
-                if f.GetSeverity() == DB.FailureSeverity.Error:
-                    return DB.FailureProcessingResult.ProceedWithRollBack
+            errors = [f for f in failuresAccessor.GetFailureMessages()
+                      if f.GetSeverity() == DB.FailureSeverity.Error]
+            if errors:
+                # Prefer deleting just the offending elements (e.g. one bad wall in a
+                # batch of 300) over losing the whole transaction.
+                from System.Collections.Generic import List
+                ids = List[DB.ElementId]()
+                for f in errors:
+                    for eid in f.GetFailingElementIds():
+                        if eid not in ids:
+                            ids.Add(eid)
+                self.errors.extend(f.GetDescriptionText() for f in errors)
+                if ids.Count and all(f.GetFailingElementIds().Count for f in errors):
+                    self.deleted.extend(i.Value for i in ids)
+                    failuresAccessor.DeleteElements(ids)
+                    return DB.FailureProcessingResult.ProceedWithCommit
+                return DB.FailureProcessingResult.ProceedWithRollBack
         except Exception:
             pass
         return DB.FailureProcessingResult.Continue
@@ -35,15 +56,20 @@ def suppress_warnings(transaction):
 
     Warnings are auto-deleted (operation proceeds); errors roll the transaction
     back cleanly. Call right after transaction.Start(). Best-effort — never raises.
+
+    Returns the preprocessor so callers can report ``.errors`` (the messages
+    that caused a rollback) and ``.warnings`` (how many were deleted).
     """
+    swallower = _FailureSwallower()
     try:
         opts = transaction.GetFailureHandlingOptions()
         opts.SetForcedModalHandling(False)
         opts.SetClearAfterRollback(True)
-        opts.SetFailuresPreprocessor(_FailureSwallower())
+        opts.SetFailuresPreprocessor(swallower)
         transaction.SetFailureHandlingOptions(opts)
     except Exception:
         pass
+    return swallower
 
 
 def normalize_string(text):
