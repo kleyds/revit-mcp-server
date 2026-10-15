@@ -8,7 +8,7 @@
     "author_profile": "https://github.com/Demolinator",
     "builtin": "True",
     "default_enabled": "True",
-    "rocket_mode_compatible": "True",
+    "rocket_mode_compatible": "False",
     "image": "",
     "dependencies": []
 }
