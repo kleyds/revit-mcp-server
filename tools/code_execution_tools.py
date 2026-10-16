@@ -10,7 +10,7 @@ def register_code_execution_tools(mcp, revit_get, revit_post, revit_image):
 
     @mcp.tool()
     async def execute_revit_code(
-        code: str, description: str = "Code execution", ctx: Context = None
+        code: str, description: str = "Code execution", timeout_seconds: float = 30.0, ctx: Context = None
     ) -> str:
         """Run IronPython 2.7 code inside Revit and return what it prints.
 
@@ -41,8 +41,12 @@ def register_code_execution_tools(mcp, revit_get, revit_post, revit_image):
             code: IronPython source to execute.
             description: Short label; it becomes the transaction name shown
                 in Revit's Undo menu.
+            timeout_seconds: How long to wait for Revit (default 30, max 600).
+                Raise it for slow work such as opening a large model in the
+                background (opening a 75 MB model took about 70 s).
         """
         if ctx:
             await ctx.info("Running Revit code: {}".format(description))
         payload = {"code": code, "description": description}
-        return format_response(await revit_post("/execute_code/", payload, ctx))
+        timeout = max(5.0, min(float(timeout_seconds), 600.0))
+        return format_response(await revit_post("/execute_code/", payload, ctx, timeout=timeout))

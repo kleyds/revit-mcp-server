@@ -530,6 +530,11 @@
     "default": "Code execution",
     "title": "Description",
     "type": "string"
+   },
+   "timeout_seconds": {
+    "default": 30.0,
+    "title": "Timeout Seconds",
+    "type": "number"
    }
   },
   "required": [
